@@ -1,0 +1,42 @@
+# Dependencies
+node_modules
+.pnp
+.pnp.js
+
+# Environment variables
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Debug logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+logs
+*.log
+
+# Runtime data
+pids
+*.pid
+*.seed
+*.pid.lock
+
+# Coverage directory used by tools like istanbul
+coverage
+
+# Uploads directory
+uploads/*
+!uploads/.gitkeep
+
+# Optional: if you generate reports
+report.[0-9]*.[0-9]*.[0-9]*.[0-9]*.json
+
+# Helper scripts
+debug_*.js
+test_*.js
+
+# OS metadata
+.DS_Store
+Thumbs.db
