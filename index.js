@@ -35,5 +35,6 @@ app.use('/api/auth/google', require('./routes/googleAuth'));
 app.use('/api/roleplay', require('./routes/roleplay'));
 app.use('/api/history', require('./routes/history'));
 app.use('/api/daily', require('./routes/daily'));
+app.use('/api/tutor', require('./routes/tutor'));
 
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));

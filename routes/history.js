@@ -5,6 +5,7 @@ const auth = require('../middleware/auth');
 const SentenceHistory = require('../models/SentenceHistory');
 const InterviewSession = require('../models/InterviewSession');
 const RoleplaySession = require('../models/RoleplaySession');
+const TutorSession = require('../models/TutorSession');
 
 // @route   GET /api/history
 // @desc    Get merged history from all types
@@ -14,10 +15,11 @@ router.get('/', auth, async (req, res) => {
         const userId = req.user.id;
 
         // Fetch all in parallel
-        const [practice, interview, roleplay] = await Promise.all([
+        const [practice, interview, roleplay, tutor] = await Promise.all([
             SentenceHistory.find({ userId }).sort({ createdAt: -1 }).limit(20).populate('mistakes').lean(),
             InterviewSession.find({ userId }).sort({ createdAt: -1 }).limit(10).lean(),
-            RoleplaySession.find({ userId }).sort({ createdAt: -1 }).limit(10).lean()
+            RoleplaySession.find({ userId }).sort({ createdAt: -1 }).limit(10).lean(),
+            TutorSession.find({ userId }).sort({ createdAt: -1 }).limit(10).lean()
         ]);
 
         // Normalize data structure
@@ -48,8 +50,17 @@ router.get('/', auth, async (req, res) => {
             details: r
         }));
 
+        const normalizedTutor = tutor.map(t => ({
+            id: t._id,
+            type: 'tutor',
+            date: t.createdAt,
+            title: 'AI Tutor Chat',
+            preview: t.messages.length > 0 ? t.messages[0].content.substring(0, 50) + '...' : 'Empty session',
+            details: t
+        }));
+
         // Merge and sort by date descending
-        const merged = [...normalizedPractice, ...normalizedInterview, ...normalizedRoleplay]
+        const merged = [...normalizedPractice, ...normalizedInterview, ...normalizedRoleplay, ...normalizedTutor]
             .sort((a, b) => new Date(b.date) - new Date(a.date));
 
         res.json(merged);

@@ -145,12 +145,14 @@ router.post('/evaluate', auth, checkQuota, async (req, res) => {
         1. A score out of 10.
         2. Feedback on grammar and tone.
         3. A "Better Answer" example.
+        4. A "nextQuestion" to continue the interview. It should cleanly follow up or move to a new relevant topic.
         
         Return STRICT JSON format (no markdown code blocks, no newlines in strings):
         {
             "score": 8,
             "feedback": "...",
             "betterAnswer": "...",
+            "nextQuestion": "...",
             "mistakes": [
                 { "wrong": "...", "right": "...", "rule": "..." }
             ]
@@ -165,12 +167,9 @@ router.post('/evaluate', auth, checkQuota, async (req, res) => {
             return match ? match[0] : text;
         };
 
-        const text = extractJSON(responseText);
+        const jsonText = extractJSON(responseText);
 
-        // Clean up the text to ensure valid JSON
-        text = extractJSON(text);
-
-        const evaluation = JSON.parse(text);
+        const evaluation = JSON.parse(jsonText);
 
         // --- Save Mistakes to DB ---
         if (evaluation.mistakes && Array.isArray(evaluation.mistakes)) {
@@ -199,12 +198,25 @@ router.post('/evaluate', auth, checkQuota, async (req, res) => {
 
         // Save to session if exists
         if (sessionId) {
+            const newMessages = [
+                {
+                    role: 'user',
+                    content: answer,
+                    evaluation: evaluation
+                }
+            ];
+
+            if (evaluation.nextQuestion) {
+                newMessages.push({
+                    role: 'ai',
+                    content: evaluation.nextQuestion
+                });
+            }
+
             await InterviewSession.findByIdAndUpdate(sessionId, {
                 $push: {
                     messages: {
-                        role: 'user',
-                        content: answer,
-                        evaluation: evaluation
+                        $each: newMessages
                     }
                 },
                 $set: { lastUpdated: Date.now() }
