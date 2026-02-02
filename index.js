@@ -40,5 +40,7 @@ app.use('/api/roleplay', require('./routes/roleplay'));
 app.use('/api/history', require('./routes/history'));
 app.use('/api/daily', require('./routes/daily'));
 app.use('/api/tutor', require('./routes/tutor'));
+app.use('/api/flashcards', require('./routes/flashcards'));
+app.use('/api/debate', require('./routes/debate'));
 
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));

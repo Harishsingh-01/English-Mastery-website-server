@@ -12,6 +12,7 @@ const checkQuota = async (req, res, next) => {
         if (userDate.getDate() !== today.getDate() || userDate.getMonth() !== today.getMonth()) {
             user.usage.count = 0;
             user.usage.date = today;
+            await user.save();
         }
 
         const LIMIT = 100; // Daily request limit (Increased)

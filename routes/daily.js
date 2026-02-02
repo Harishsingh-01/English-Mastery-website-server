@@ -23,18 +23,19 @@ router.get('/word', auth, async (req, res) => {
         console.log("Generating new Daily Word for:", today);
 
         const prompt = `
-        Generate an interesting, advanced English "Word of the Day" for an English learner.
-        It should be C1/C2 level but useful.
+        Generate an interesting, useful English "Word of the Day" for an English learner.
+        It should be an Intermediate to Advanced (B2/C1) word that is commonly used in professional or daily conversation.
+        Avoid extremely obscure words.
         
         Return JSON ONLY:
         {
-            "word": "Serendipity",
-            "pronunciation": "/ˌser.ənˈdɪp.ə.t̬i/ • noun",
-            "definition": "The occurrence of events by chance in a happy or beneficial way.",
-            "hindiMeaning": "संयोग (Sanyog) - नसीब से मिली खुशकिस्मती",
+            "word": "Resilient",
+            "pronunciation": "/rɪˈzɪl.jənt/ • adjective",
+            "definition": "Able to withstand or recover quickly from difficult conditions.",
+            "hindiMeaning": "लचीला (Lachila) - कठिनाइयों से जल्दी उबरने वाला",
             "examples": [
-                "Example sentence 1",
-                "Example sentence 2"
+                "She is remarkably resilient.",
+                "The economy has proven to be resilient."
             ]
         }
         `;

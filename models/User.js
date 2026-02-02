@@ -10,6 +10,8 @@ const UserSchema = new mongoose.Schema({
         count: { type: Number, default: 0 },
         date: { type: Date, default: Date.now }
     },
+    resetPasswordToken: { type: String },
+    resetPasswordExpires: { type: Date },
     createdAt: { type: Date, default: Date.now }
 });
 
