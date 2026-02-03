@@ -14,23 +14,26 @@ router.post('/start', auth, checkQuota, async (req, res) => {
         let openingStatement = "";
 
         if (!selectedTopic) {
-            // Generate a topic
-            let topicPrompt = `Generate a controversial but safe topic for an English debate practice session. 
-            Difficulty: ${difficulty}. 
-            Return ONLY the topic sentence.`;
-
             if (difficulty === 'easy') {
+                const randomSeed = Math.random();
                 topicPrompt = `You are a topic generator for beginner English learners.
-                Generate a very simple, 2-3 word debate topic.
-                STRICTLY choose ONLY from these subjects: 
-                1. Traditional Marketing vs Digital Marketing
-                2. Online Shopping vs Offline Shopping
-                3. Is AI taking jobs? / Is AI good?
-                4. Work from Home vs Office
-                5. City Life vs Village Life
+                Generate a completely new, random, simple debate topic.
+                Random Seed: ${randomSeed} (Use this to ensure variety).
+
+                Constraints:
+                - Max 4-7 words.
+                - Use only simple vocabulary (A1 Level).
+                - NEVER generate topics about "Cats" or "Dogs" (User is bored of them).
+                - VARY the subject (School, Food, Technology, Hobbies, Travel).
                 
-                Do NOT generate sentence-length topics. simple and short topic.
-                Return ONLY the topic phrase.`;
+                Examples of allowed topics:
+                - "Pizza is better than burgers"
+                - "Morning is better than night"
+                - "We should read more books"
+                - "Cooking is a useful skill"
+                - "Traveling is good for you"
+                
+                Return ONLY the topic sentence.`;
             }
 
             selectedTopic = await generateContent(topicPrompt);
@@ -117,12 +120,21 @@ router.post('/turn', auth, checkQuota, async (req, res) => {
 
         // 2. Generate AI Rebuttal
         const context = session.turns.map(t => `${t.role === 'user' ? 'Opponent' : 'You'}: ${t.content}`).join('\n');
+
+        let rebuttalInstructions = `Maintain a ${session.difficulty} vocabulary level.`;
+        if (session.difficulty === 'easy') {
+            rebuttalInstructions = `STRICTLY use A1/Kindergarten English. 
+            - Use short sentences (5-8 words max).
+            - NO big words.
+            - Start with simple phrases like "I think", "But", "No".`;
+        }
+
         const rebuttalPrompt = `You are debating about "${session.topic}".
         Current Dialogue:
         ${context}
 
-        Your Goal: Rebut the opponent's last point. Be concise (max 3 sentences). 
-        Maintain a ${session.difficulty} vocabulary level (Easy = simple words, short sentences).
+        Your Goal: Rebut the opponent's last point. 
+        ${rebuttalInstructions}
         Return ONLY your text response.`;
 
         const rebuttal = await generateContent(rebuttalPrompt);
