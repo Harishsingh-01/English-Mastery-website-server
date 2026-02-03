@@ -20,8 +20,8 @@ router.post('/start', auth, checkQuota, async (req, res) => {
             Return ONLY the topic sentence.`;
 
             if (difficulty === 'easy') {
-                topicPrompt = `You are a topic generator for English learners.
-                Generate a very simple, common debate topic.
+                topicPrompt = `You are a topic generator for beginner English learners.
+                Generate a very simple, 2-3 word debate topic.
                 STRICTLY choose ONLY from these subjects: 
                 1. Traditional Marketing vs Digital Marketing
                 2. Online Shopping vs Offline Shopping
@@ -29,8 +29,8 @@ router.post('/start', auth, checkQuota, async (req, res) => {
                 4. Work from Home vs Office
                 5. City Life vs Village Life
                 
-                Do NOT generate complex political or abstract topics. Keep it very simple.
-                Return ONLY the topic sentence.`;
+                Do NOT generate sentence-length topics. simple and short topic.
+                Return ONLY the topic phrase.`;
             }
 
             selectedTopic = await generateContent(topicPrompt);
@@ -38,15 +38,19 @@ router.post('/start', auth, checkQuota, async (req, res) => {
         }
 
         // Generate opening statement
-        const openingPrompt = `You are a skilled debater. 
-        Topic: "${selectedTopic}". 
-        Difficulty Level: ${difficulty} (Easy = very simple words, short sentences. Hard = complex, academic).
+        const openingPrompt = `You are debating about "${selectedTopic}". 
+        Difficulty Level: ${difficulty}.
         
-        Your goal: Challenge the user to argue against you.
+        Your Goal: Start the debate with a very simple opinion.
         
-        Provide a short 2-3 sentence opening statement introducing your specific stance on this topic.
-        Make it engaging and provoke a response.
-        IMPORTANT: Adjust your vocabulary to match the ${difficulty} level exactly.`;
+        CRITICAL INSTRUCTION FOR EASY MODE:
+        - If difficulty is 'easy', use ONLY Kindergarten/A1 level English.
+        - Use extremely simple words like "good", "bad", "like", "hate".
+        - MAX 2 SENTENCES.
+        - Example: "I like dogs. They are fun friends."
+        
+        For other difficulties, adjust accordingly.
+        Return ONLY your opening statement.`;
 
         openingStatement = await generateContent(openingPrompt);
         await incrementUsage(req.user.id);
