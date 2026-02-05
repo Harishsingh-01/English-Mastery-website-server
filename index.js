@@ -6,6 +6,10 @@ const cors = require('cors');
 const app = express();
 const PORT = process.env.PORT || 5000;
 
+app.get('/health', (req, res) => {
+    res.status(200).send('OK');
+});
+
 app.use(cors({
     origin: [process.env.CLIENT_URL || 'http://localhost:5173', 'http://localhost:3000'],
     credentials: true
@@ -17,18 +21,7 @@ require('./config/passport')(passport);
 app.set('trust proxy', 1); // Required for Render/Heroku/Vercel (behind proxy)
 app.use(passport.initialize());
 
-// Database Connection
-mongoose.connect(process.env.MONGO_URI || 'mongodb://localhost:27017/english-app')
-    .then(() => console.log('MongoDB Connected'))
-    .catch(err => console.log(err));
 
-app.get('/', (req, res) => {
-    res.send('API is running...');
-});
-
-app.get('/health', (req, res) => {
-    res.status(200).send('OK');
-});
 
 app.use('/api/auth', require('./routes/auth'));
 app.use('/api/analyze', require('./routes/analyze'));
@@ -44,3 +37,13 @@ app.use('/api/flashcards', require('./routes/flashcards'));
 app.use('/api/debate', require('./routes/debate'));
 
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+
+// Database Connection
+(async () => {
+  try {
+    await mongoose.connect(process.env.MONGO_URI);
+    console.log('MongoDB Connected');
+  } catch (err) {
+    console.error(err.message);
+  }
+})();
