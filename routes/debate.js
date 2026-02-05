@@ -5,62 +5,87 @@ const DebateSession = require('../models/DebateSession');
 const { generateContent } = require('../utils/aiHelper');
 const { checkQuota, incrementUsage } = require('../middleware/quota');
 
-// Start a new debate
-router.post('/start', auth, checkQuota, async (req, res) => {
+// Initialize debate (Generate Topic + Sides)
+router.post('/init', auth, checkQuota, async (req, res) => {
     const { topic, difficulty = 'medium' } = req.body;
 
     try {
         let selectedTopic = topic;
-        let openingStatement = "";
+        let sides = ["Agree", "Disagree"]; // Default
 
         if (!selectedTopic) {
+            // GENERATE NEW TOPIC
+            let topicPrompt = `Generate a controversial but safe topic for an English debate practice session. Difficulty: ${difficulty}. Return ONLY the topic sentence.`;
+
             if (difficulty === 'easy') {
                 const randomSeed = Math.random();
                 topicPrompt = `You are a topic generator for beginner English learners.
                 Generate a completely new, random, simple debate topic.
                 Random Seed: ${randomSeed} (Use this to ensure variety).
-
                 Constraints:
                 - Max 4-7 words.
                 - Use only simple vocabulary (A1 Level).
-                - NEVER generate topics about "Cats" or "Dogs" (User is bored of them).
-                - VARY the subject (School, Food, Technology, Hobbies, Travel).
-                
-                Examples of allowed topics:
-                - "Pizza is better than burgers"
-                - "Morning is better than night"
-                - "We should read more books"
-                - "Cooking is a useful skill"
-                - "Traveling is good for you"
-                
+                - NEVER generate topics about "Cats" or "Dogs".
+                - VARY the subject.
                 Return ONLY the topic sentence.`;
             }
-
             selectedTopic = await generateContent(topicPrompt);
             await incrementUsage(req.user.id);
         }
 
+        // EXTRACT SIDES
+        const sidePrompt = `Topic: "${selectedTopic}"
+        Identify the two opposing sides of this debate.
+        Return JSON ONLY: ["Side A", "Side B"]
+        Example for "Cats vs Dogs": ["Cats", "Dogs"]
+        Example for "Homework is bad": ["Agree", "Disagree"]`;
+
+        const sideRes = await generateContent(sidePrompt, true);
+        try {
+            const jsonMatch = sideRes.match(/\[[\s\S]*\]/);
+            if (jsonMatch) sides = JSON.parse(jsonMatch[0]);
+        } catch (e) {
+            console.error("JSON Parse Error", e);
+        }
+
+        res.json({ topic: selectedTopic, sides });
+
+    } catch (err) {
+        console.error(err);
+        res.status(500).send('Server Error');
+    }
+});
+
+// Start a new debate
+router.post('/start', auth, checkQuota, async (req, res) => {
+    const { topic, difficulty = 'medium', userStance } = req.body; // Added userStance
+
+
+    try {
+        // Topic is now passed from frontend (generated via /init)
+
         // Generate opening statement
-        const openingPrompt = `You are debating about "${selectedTopic}". 
+        const openingPrompt = `You are debating about "${topic}". 
         Difficulty Level: ${difficulty}.
+        User's Stance: "${userStance}".
         
-        Your Goal: Start the debate with a very simple opinion.
+        Your Goal: You must argue AGAINST the user's stance.
         
         CRITICAL INSTRUCTION FOR EASY MODE:
-        - If difficulty is 'easy', use ONLY Kindergarten/A1 level English.
-        - Use extremely simple words like "good", "bad", "like", "hate".
-        - MAX 2 SENTENCES.
-        - Example: "I like dogs. They are fun friends."
+        - If difficulty is 'easy', use A2 (Elementary) level English.
+        - Use simple, natural everyday words. Avoid complex academic terms.
+        - WRITE 3-5 CLEAR SENTENCES.
+        - Example: "I disagree with you. I think [Opposite] is better because..."
         
         For other difficulties, adjust accordingly.
         Return ONLY your opening statement.`;
 
-        openingStatement = await generateContent(openingPrompt);
+        const openingStatement = await generateContent(openingPrompt);
         await incrementUsage(req.user.id);
 
         const session = new DebateSession({
             user: req.user.id,
-            topic: selectedTopic,
+            topic: topic,
             difficulty,
             turns: [{
                 role: 'ai',
@@ -72,7 +97,7 @@ router.post('/start', auth, checkQuota, async (req, res) => {
 
         res.json({
             sessionId: session._id,
-            topic: selectedTopic,
+            topic: topic,
             openingStatement
         });
 
@@ -84,7 +109,7 @@ router.post('/start', auth, checkQuota, async (req, res) => {
 
 // Process a user turn
 router.post('/turn', auth, checkQuota, async (req, res) => {
-    const { sessionId, message } = req.body;
+    const { sessionId, message, argumentHistory, strategy } = req.body; // Added strategy
 
     try {
         const session = await DebateSession.findById(sessionId);
@@ -97,15 +122,16 @@ router.post('/turn', auth, checkQuota, async (req, res) => {
 
         Return JSON ONLY:
         {
-            "coherenceScore": (1-10 integer, how logical?),
-            "grammarScore": (1-10 integer),
-            "feedback": "1 sentence quick tip"
+            "coherenceScore": (1-100 integer, how logical?),
+            "strengthScore": (1-100 integer, how strong is the point?),
+            "fallacies": ["If a logical error is found, explain it in very simple English (A2 level). Example: 'You attacked the person instead of the idea.' instead of 'Ad Hominem'. Return empty array if good."],
+            "feedback": "1 sentence quick tip to improve."
         }`;
 
         const feedbackRes = await generateContent(feedbackPrompt, true);
         await incrementUsage(req.user.id);
 
-        let feedbackData = { coherenceScore: 0, grammarScore: 0, feedback: "Keep going!" };
+        let feedbackData = { coherenceScore: 0, strengthScore: 0, fallacies: [], feedback: "Keep going!" };
         try {
             const jsonMatch = feedbackRes.match(/\{[\s\S]*\}/);
             if (jsonMatch) feedbackData = JSON.parse(jsonMatch[0]);
@@ -121,20 +147,59 @@ router.post('/turn', auth, checkQuota, async (req, res) => {
         // 2. Generate AI Rebuttal
         const context = session.turns.map(t => `${t.role === 'user' ? 'Opponent' : 'You'}: ${t.content}`).join('\n');
 
-        let rebuttalInstructions = `Maintain a ${session.difficulty} vocabulary level.`;
+        // Prepare Memory String from DB (Single Source of Truth)
+        const memoryContext = "PAST ARGUMENTS (Check for contradictions):\n" +
+            session.turns
+                .filter(t => t.role === 'user')
+                .map((t, i) => `User Turn ${i + 1}: "${t.content}"`)
+                .join('\n');
+
+        // STRATEGY ENGINE LOGIC
+        let strategyInstructions = "";
+        if (strategy) {
+            strategyInstructions = `
+            STRATEGY MODE: ${strategy.mode.toUpperCase()}
+            AGGRESSION LEVEL: ${strategy.aggression * 100}%
+            ANALYSIS DEPTH: Level ${strategy.depth}
+            
+            BEHAVIOR GUIDELINES:
+            - If Mode is 'defend': Be polite, focus on finding common ground, correct gently.
+            - If Mode is 'attack': Be sharp, relentlessly find flaws, ask trapping questions.
+            - If Mode is 'balanced': Mix agreement with constructive counter-points.
+            `;
+        } else {
+            // Fallback if strategy missing
+            strategyInstructions = `Maintain a ${session.difficulty} vocabulary level.`;
+        }
+
+        // Add vocabulary constraints separately
+        let vocabInstructions = "";
         if (session.difficulty === 'easy') {
-            rebuttalInstructions = `STRICTLY use A1/Kindergarten English. 
-            - Use short sentences (5-8 words max).
-            - NO big words.
-            - Start with simple phrases like "I think", "But", "No".`;
+            vocabInstructions = "- Vocabulary: A2 (Elementary). Simple sentences.";
+        } else if (session.difficulty === 'medium') {
+            vocabInstructions = "- Vocabulary: B1/B2 (Intermediate). Professional tone.";
+        } else {
+            vocabInstructions = "- Vocabulary: C1/C2 (Advanced). Sophisticated and precise.";
         }
 
         const rebuttalPrompt = `You are debating about "${session.topic}".
+        
+        ${memoryContext}
+
         Current Dialogue:
         ${context}
 
-        Your Goal: Rebut the opponent's last point. 
-        ${rebuttalInstructions}
+        Your Goal: DIRECTLY respond to the opponent's last point.
+        
+        ${strategyInstructions}
+        ${vocabInstructions}
+        
+        INSTRUCTIONS:
+        1. MEMORY CHECK: Review "PAST ARGUMENTS". If the USER has contradicted their own previous statements, YOU MUST POINT IT OUT ("Earlier you argued X, but now you say Y...").
+        2. ACKNOWLEDGE: Briefly summarize their current point.
+        3. COUNTER: Apply the strategy mode (${strategy ? strategy.mode : 'standard'}) to logically dismantle or address their point.
+        
+        IMPORTANT: Listen and Respond. Do not monologue. Use the memory!
         Return ONLY your text response.`;
 
         const rebuttal = await generateContent(rebuttalPrompt);

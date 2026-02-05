@@ -14,6 +14,33 @@ const InterviewSessionSchema = new mongoose.Schema({
         type: String, // Extracted text from resume
         default: ''
     },
+    questionCount: {
+        type: Number,
+        default: 0
+    },
+    interviewPhase: {
+        type: String,
+        enum: ['intro', 'technical', 'behavioral', 'scenario', 'hr', 'closing'],
+        default: 'intro'
+    },
+    interviewType: {
+        type: String,
+        enum: ['general', 'technical', 'hr', 'behavioral', 'hybrid'],
+        default: 'general'
+    },
+    manualContext: {
+        type: String, // User-entered skills/projects if no resume
+        default: ''
+    },
+    finalFeedback: {
+        type: Object, // Stores { hiringDecision, strengths, weaknesses, improvementPlan }
+        default: null
+    },
+    interviewerMood: {
+        type: String,
+        enum: ['friendly', 'neutral', 'strict'],
+        default: 'friendly'
+    },
     messages: [
         {
             role: { type: String, enum: ['ai', 'user', 'system'], required: true },

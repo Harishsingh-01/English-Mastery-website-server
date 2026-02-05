@@ -16,6 +16,10 @@ router.post('/', auth, checkQuota, async (req, res) => {
         return res.status(400).json({ msg: 'Please provide a sentence' });
     }
 
+    if (sentence.length > 500) {
+        return res.status(400).json({ msg: 'Sentence too long (max 500 characters)' });
+    }
+
     try {
         let systemInstruction = "Correct the following English sentence(s) and highlight mistakes.";
         if (strictMode) {
@@ -57,7 +61,16 @@ router.post('/', auth, checkQuota, async (req, res) => {
         const match = text.match(/\{[\s\S]*\}/);
         if (match) text = match[0];
 
-        const result = JSON.parse(text);
+        let result;
+        try {
+            result = JSON.parse(text);
+        } catch (e) {
+            console.error("AI Analysis Parse Failed", text);
+            return res.status(500).json({
+                msg: 'AI response parsing failed',
+                raw: responseText.substring(0, 100) + "..."
+            });
+        }
 
         // Save Mistakes
         const mistakeIds = [];

@@ -8,22 +8,26 @@ const { checkQuota, incrementUsage } = require('../middleware/quota');
 const SCENARIOS = {
     cafe: {
         title: "Coffee Shop",
-        systemPrompt: "You are a friendly barista at a coffee shop called 'Star Beans'. The user is a customer. Your goal is to take their order. Start by welcoming them. Keep responses short (1-2 sentences) and conversational. Do not correct their grammar yet, just roleplay natural conversation.",
+        basePrompt: "You are a friendly barista at 'Star Beans'.",
+        goal: "Order a drink and confirm payment.",
         initialMessage: "Hi there! Welcome to Star Beans. What can I get started for you today?"
     },
     doctor: {
         title: "Doctor's Appointment",
-        systemPrompt: "You are a helpful doctor. The user is a patient describing symptoms. Ask clarifying questions about their health. Keep responses professional but warm. Do not correct grammar yet.",
+        basePrompt: "You are a helpful doctor. The user is a patient.",
+        goal: "Describe symptoms and get a diagnosis.",
         initialMessage: "Good morning. I see you have an appointment. What seems to be the trouble today?"
     },
     job_negotiation: {
         title: "Salary Negotiation",
-        systemPrompt: "You are a tough but fair hiring manager. The user has just received a job offer and is trying to negotiate a higher salary. Be professional, slightly resistant, but open to good arguments.",
+        basePrompt: "You are a tough but fair hiring manager.",
+        goal: "Negotiate a higher salary after a job offer.",
         initialMessage: "We're really excited to offer you the position. The starting salary is $60,000. What are your thoughts?"
     },
     airport: {
         title: "Airport Check-in",
-        systemPrompt: "You are an airline check-in agent. The user is checking in for a flight. Ask for their passport and if they have bags to check.",
+        basePrompt: "You are an airline check-in agent.",
+        goal: "Check in for a flight and handle luggage.",
         initialMessage: "Next please! Hello, where are you flying to today?"
     }
 };
@@ -38,10 +42,7 @@ router.post('/start', auth, checkQuota, async (req, res) => {
         return res.status(400).json({ msg: 'Invalid scenario' });
     }
 
-    // We don't need to call AI for the first message, we can use the static initial message
-    // But we count it as usage to prevent abuse if we wanted, though strictly it's static.
-    // Let's NOT count quota for starting, only for chatting.
-
+    // Return the initial message and scenario config
     res.json({
         message: SCENARIOS[scenario].initialMessage,
         scenarioConfig: SCENARIOS[scenario]
@@ -52,35 +53,72 @@ router.post('/start', auth, checkQuota, async (req, res) => {
 // @desc    Continue the conversation
 // @access  Private
 router.post('/chat', auth, checkQuota, async (req, res) => {
-    const { message, history, scenario } = req.body;
+    const { message, history, scenario, difficulty = 'medium', correctionMode = 'off' } = req.body;
 
     if (!message || !scenario || !SCENARIOS[scenario]) {
         return res.status(400).json({ msg: 'Invalid request' });
     }
 
     try {
-        const scenarioConfig = SCENARIOS[scenario];
+        const config = SCENARIOS[scenario];
 
-        // Construct prompt with history
-        let prompt = `System: ${scenarioConfig.systemPrompt}\n\n`;
-
-        // Add last few turns of history for context (simplified)
-        // ideally history should come from client formatted correctly
-        if (history && history.length > 0) {
-            history.forEach(msg => {
-                prompt += `${msg.role === 'user' ? 'Customer' : 'Roleplayer'}: ${msg.content}\n`;
-            });
+        // 1. Difficulty Logic
+        let difficultyInstruction = "";
+        switch (difficulty) {
+            case 'easy': difficultyInstruction = "Speak in short, simple sentences. Speak slowly. Be very helpful/patient."; break;
+            case 'medium': difficultyInstruction = "Speak naturally like a native speaker. Normal speed."; break;
+            case 'hard': difficultyInstruction = "Speak fast, use idioms/slang suitable for the context. Be less patient or stricter if the role implies it (e.g., busy waiter). Apply real-life pressure."; break;
         }
 
-        prompt += `Customer: ${message}\nRoleplayer:`;
+        // 2. Goal & Correction Instructions
+        const systemPrompt = `
+        Role: ${config.basePrompt}
+        User's Goal: ${config.goal}
+        your Task: Roleplay with the user.
+        - ${difficultyInstruction}
+        - Push the conversation forward towards the goal.
+        - If the user fails or gets stuck, guide them.
 
-        const aiResponse = await generateAIResponse(prompt, 'gemini-2.0-flash-lite-preview-02-05'); // Using fast model
+        OUTPUT FORMAT: Return a JSON object ONLY.
+        {
+            "response": "Your spoken reply to the user...",
+            "suggestion": "A better/more native phrase the user COULD have said instead of their last message (optional, null if perfect)",
+            "correction": "Soft grammar correction if needed (optional, null if perfect). Be gentle."
+        }
 
-        if (aiResponse) {
+        ${correctionMode === 'off' ? 'ignore correction field (return null).' : 'Provide soft corrections in the "correction" field.'}
+        `;
+
+        // Construct Chat History for AI
+        // We need to pass history as a "chat" structure or just lines
+        let fullPrompt = systemPrompt + "\n\nConversation History:\n";
+        if (history && history.length > 0) {
+            history.forEach(msg => {
+                fullPrompt += `${msg.role === 'user' ? 'User' : 'Roleplayer'}: ${msg.content}\n`;
+            });
+        }
+        fullPrompt += `User: ${message}\nRoleplayer: (JSON)`;
+
+        const textResponse = await generateAIResponse(fullPrompt, 'gemini-2.0-flash-lite-preview-02-05', true); // Force JSON
+
+        if (textResponse) {
             await incrementUsage(req.user.id);
-            res.json({ response: aiResponse });
+
+            // Safe Parse
+            let result;
+            try {
+                const match = textResponse.match(/\{[\s\S]*\}/);
+                const jsonStr = match ? match[0] : textResponse;
+                result = JSON.parse(jsonStr);
+            } catch (e) {
+                console.error("AI Roleplay Parse Failed", textResponse);
+                // Fallback
+                result = { response: textResponse, suggestion: null, correction: null };
+            }
+
+            res.json(result);
         } else {
-            res.status(500).json({ msg: "AI could not generate a response" });
+            res.status(500).json({ msg: "AI response failed" });
         }
 
     } catch (err) {

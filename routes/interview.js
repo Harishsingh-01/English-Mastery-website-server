@@ -10,7 +10,16 @@ const Mistake = require('../models/Mistake');
 const { generateContent } = require('../utils/aiHelper');
 const { checkQuota, incrementUsage } = require('../middleware/quota');
 
-const upload = multer({ dest: 'uploads/' });
+const upload = multer({
+    dest: 'uploads/',
+    limits: { fileSize: 5 * 1024 * 1024 }, // 5MB Limit
+    fileFilter: (req, file, cb) => {
+        if (file.mimetype !== 'application/pdf') {
+            return cb(new Error('Only PDF files allowed'));
+        }
+        cb(null, true);
+    }
+});
 
 // --- Helper: PDF Extraction (Bypassing pdf-parse) ---
 async function extractText(buffer) {
@@ -44,14 +53,16 @@ router.post('/start', auth, upload.single('resume'), async (req, res) => {
     try {
         let resumeText = '';
         if (req.file) {
-            const dataBuffer = fs.readFileSync(req.file.path);
+            const dataBuffer = await fs.promises.readFile(req.file.path);
             resumeText = await extractText(dataBuffer);
-            fs.unlinkSync(req.file.path); // Cleanup
+            await fs.promises.unlink(req.file.path); // Cleanup
         }
 
         const session = new InterviewSession({
             user: req.user.id,
             resumeContext: resumeText,
+            manualContext: req.body.manualContext || '',
+            interviewType: req.body.interviewType || 'general',
             messages: []
         });
         await session.save();
@@ -75,7 +86,22 @@ router.get('/history', auth, async (req, res) => {
     }
 });
 
-// 3. Get Specific Session
+// 3. Delete Session
+router.delete('/session/:id', auth, async (req, res) => {
+    try {
+        const session = await InterviewSession.findById(req.params.id);
+        if (!session) return res.status(404).json({ msg: 'Session not found' });
+        if (session.user.toString() !== req.user.id) return res.status(401).json({ msg: 'Not authorized' });
+
+        await InterviewSession.deleteOne({ _id: req.params.id });
+        res.json({ msg: 'Session removed' });
+    } catch (err) {
+        console.error(err);
+        res.status(500).send('Server Error');
+    }
+});
+
+// 4. Get Specific Session
 router.get('/session/:id', auth, async (req, res) => {
     try {
         const session = await InterviewSession.findById(req.params.id);
@@ -96,20 +122,107 @@ router.post('/question', auth, checkQuota, async (req, res) => {
         const { type, sessionId, length } = req.body; // length: 'short', 'medium', 'long'
 
         let context = '';
+        let session = null; // Fix scope issue
+
         if (sessionId) {
-            const session = await InterviewSession.findById(sessionId);
+            session = await InterviewSession.findById(sessionId);
             if (session && session.resumeContext) {
                 context = `Candidate Resume Context: "${session.resumeContext.substring(0, 1000)}..."`;
             }
         }
 
-        const lengthPrompt = length === 'short' ? 'Keep the question concise and short.' :
-            length === 'long' ? 'Ask a detailed, multi-part question.' : '';
+        // CURATED QUESTION BANK
+        const FAQ = {
+            intro: [
+                "Can you briefly introduce yourself?",
+                "Tell me about yourself apart from what’s written on your resume.",
+                "Walk me through your academic and professional background.",
+                "Can you summarize your journey so far?",
+                "How would you describe yourself to someone meeting you for the first time?"
+            ],
+            technical: [
+                "Which backend or core technologies are you familiar with?",
+                "Can you explain the difference between SQL and PostgreSQL?",
+                "Which SQL concepts are you confident in?",
+                "How do you usually debug issues in your code?",
+                "Which web technologies are you most confident in?",
+                "Can you explain the projects you have worked on?",
+                "Describe one project in detail.",
+                "Which tech stack are you most comfortable with?"
+            ],
+            behavioral: [
+                "Tell me about a time you faced a conflict in a team.",
+                "How do you usually resolve disagreements in a team?",
+                "Describe a situation where you showed leadership?",
+                "How do you handle feedback or criticism?",
+                "How do you approach tasks that are new to you?",
+                "Tell me about a failure in your project and what you learned from it."
+            ],
+            scenario: [
+                "What would you do if you are assigned a task you don’t know how to complete?",
+                "How would you respond if a project fails in production?",
+                "What if a client demands an unrealistic deadline?",
+                "How would you handle receiving a better offer after joining us?",
+                "What would you do if your senior is being unfair?"
+            ],
+            hr: [
+                "Why do you want to join our organization?",
+                "What motivates you to apply to our company specifically?",
+                "Where do you see yourself in the next 3 to 5 years?",
+                "What are your key strengths?",
+                "What is one weakness you are currently working on?",
+                "Why should we hire you for this role?"
+            ],
+            closing: [
+                "Do you have any questions for us?",
+                "Is there anything you would like to ask or clarify?",
+                "Would you like to know more about the role or team?"
+            ]
+        };
 
-        const prompt = `Generate a random 1 single interview question for a ${type || 'general'} interview context. 
-        ${context}
-        ${lengthPrompt}
-        It should be challenging but fair. Return ONLY the question string.`;
+        // 1. Determine Category based on Phase (STRICT STRUCTURE)
+        const phase = (session && session.interviewPhase) ? session.interviewPhase : 'intro';
+        const categoryQuestions = FAQ[phase] || FAQ['intro'];
+
+        // 2. Select Random Base Question (Fallback)
+        const baseQuestion = categoryQuestions[Math.floor(Math.random() * categoryQuestions.length)];
+
+        // 3. AI Rephrasing Prompt
+        const lengthPrompt = length === 'short' ? 'Keep it concise.' : '';
+        const difficulty = (session && session.difficulty) ? session.difficulty : 'medium';
+
+        let prompt;
+
+        // RESUME-DRIVEN PROMPT (If resume exists and phase allows)
+        if (context && (phase === 'intro' || phase === 'technical')) {
+            prompt = `You are a professional Technical Interviewer.
+             Candidate Level: ${difficulty}
+             Interview Phase: ${phase}
+             
+             RESUME CONTEXT:
+             ${context}
+             
+             Task: Generate a UNIQUE, SPECIFIC question based on the candidate's resume above.
+             - If Intro: Ask about a specific project or role summary.
+             - If Technical: Pick a specific skill or tool mentioned in the resume and ask a conceptual question about it.
+             - Do NOT ask generic questions like "Tell me about yourself". Be specific: "Tell me about your time at [Company]..." or "How did you use [Skill] in [Project]?"
+             
+             ${lengthPrompt}
+             Return ONLY the question string.`;
+        } else {
+            // Standard Phase-Based Rephrasing
+            prompt = `You are a professional Interviewer.
+             Candidate Level: ${difficulty}
+             Interview Phase: ${phase}
+             
+             Base Question: "${baseQuestion}"
+             
+             Task: Rephrase this question naturally to sound like a human interviewer. 
+             - Keep the core meaning relevant to ${phase}.
+             - ${lengthPrompt}
+             
+             Return ONLY the rephrased question string.`;
+        }
 
         const questionText = await generateContent(prompt); // plain text response
         await incrementUsage(req.user.id);
@@ -122,7 +235,11 @@ router.post('/question', auth, checkQuota, async (req, res) => {
             });
         }
 
-        res.json({ question: questionText });
+        res.json({
+            question: questionText,
+            interviewPhase: (session && session.interviewPhase) ? session.interviewPhase : 'intro',
+            interviewerMood: (session && session.interviewerMood) ? session.interviewerMood : 'friendly'
+        });
     } catch (err) {
         if (err.status) return res.status(err.status).json({ msg: err.message });
         console.error(err);
@@ -134,19 +251,83 @@ router.post('/question', auth, checkQuota, async (req, res) => {
 router.post('/evaluate', auth, checkQuota, async (req, res) => {
     const { question, answer, sessionId, length } = req.body;
     try {
+        // 0. QUICK CHECK: Interrupt Vague Answers (Quota Saver)
+        // BUT allow "Skip", "Next", "I don't know" to pass through to AI
+        const skipPhrases = ['next', 'skip', 'pass', 'don\'t know', 'cant answer', 'unsure', 'move on', 'proceed'];
+        const isSkip = skipPhrases.some(phrase => answer.toLowerCase().includes(phrase));
+        const wordCount = answer.trim().split(/\s+/).length;
+
+        if (!isSkip && wordCount < 15) {
+            // Save to session even if "fake" evaluation
+            if (sessionId) {
+                await InterviewSession.findByIdAndUpdate(sessionId, {
+                    $push: { messages: { role: 'user', content: answer, evaluation: { score: 3 } } }, // dummy eval
+                    $set: { lastUpdated: Date.now() },
+                    $inc: { questionCount: 1 }
+                });
+            }
+            return res.json({
+                score: 3,
+                feedback: "Your answer is too short. Please explain in more detail.",
+                betterAnswer: "",
+                nextQuestion: "Can you elaborate on that with a specific example?",
+                mistakes: []
+            });
+        }
+
+        // Fetch session for context
+        const session = await InterviewSession.findById(sessionId);
+
+        // AUTO PHASE TRANSITION LOGIC
+        session.questionCount += 1;
+        if (session.questionCount >= 9) {
+            session.interviewPhase = 'closing';
+        } else if (session.questionCount >= 6 && session.interviewPhase === 'technical') {
+            session.interviewPhase = 'behavioral';
+        } else if (session.questionCount >= 2 && session.interviewPhase === 'intro') {
+            session.interviewPhase = 'technical';
+        }
+        // Save these updates later or now? We save at the end, so just updating object is enough for prompt use below.
+
+        const currentPhase = (session && session.interviewPhase) ? session.interviewPhase : 'intro';
+        const difficulty = (session && session.difficulty) ? session.difficulty : 'medium';
+        const currentMood = (session && session.interviewerMood) ? session.interviewerMood : 'friendly';
+
         const lengthPrompt = length === 'short' ? 'Keep your feedback and better answer concise.' : '';
 
+        // 1. Confidence Check
+        const fillerEx = /um|uh|maybe|i think|probably/gi;
+        const fillerCount = (answer.match(fillerEx) || []).length;
+        const confidenceNote = fillerCount > 2
+            ? `OBSERVATION: The candidate used filler words ${fillerCount} times (um, uh, maybe). You MUST point this out and tell them to sound more confident.`
+            : "";
+
         const prompt = `You are an expert interviewer.
+        Interview Phase: ${currentPhase}
+        Candidate Level: ${difficulty}
+        Interviewer Mood: ${currentMood}
+        
         Question: "${question}"
         Candidate Answer: "${answer}"
         ${lengthPrompt}
+        ${confidenceNote}
+
+        TONE RULES:
+        - friendly: Encouraging, conversational, uses "Great point!" or "I see."
+        - neutral: Professional, balanced, objective.
+        - strict: Short, direct, challenging. "Why did you do that?", "That lacks detail."
         
         Evaluate the answer. Provide:
         1. A score out of 10.
         2. Feedback on grammar and tone.
         3. A "Better Answer" example.
-        4. A "nextQuestion" to continue the interview. It should cleanly follow up or move to a new relevant topic.
-        
+        4. A "nextQuestion".
+
+        DYNAMIC NEXT QUESTION LOGIC (Must Follow):
+        - Score < 5 (Weak): The candidate gave a weak or wrong answer. You MUST ask the SAME question again but rephrased simply.
+        - Score 5-7 (Average): Answer is okay. Next question should be standard relative to the current phase.
+        - Score > 8 (Strong): Great answer. Next question MUST be a deeper, more challenging follow-up or a slightly harder scenario.
+
         Return STRICT JSON format (no markdown code blocks, no newlines in strings):
         {
             "score": 8,
@@ -167,9 +348,26 @@ router.post('/evaluate', auth, checkQuota, async (req, res) => {
             return match ? match[0] : text;
         };
 
-        const jsonText = extractJSON(responseText);
+        let evaluation;
+        try {
+            const jsonText = extractJSON(responseText);
+            evaluation = JSON.parse(jsonText);
+        } catch (e) {
+            console.error("AI JSON Parse Failed", responseText);
+            return res.status(500).json({ msg: 'AI response parsing failed' });
+        }
 
-        const evaluation = JSON.parse(jsonText);
+        // UPDATE MOOD BASED ON SCORE
+        if (evaluation.score < 5) {
+            session.interviewerMood = 'strict';
+        } else if (evaluation.score >= 8) {
+            session.interviewerMood = 'friendly';
+        } else {
+            session.interviewerMood = 'neutral';
+        }
+
+        // ... (save mistakes and session) ...
+
 
         // --- Save Mistakes to DB ---
         if (evaluation.mistakes && Array.isArray(evaluation.mistakes)) {
@@ -221,11 +419,70 @@ router.post('/evaluate', auth, checkQuota, async (req, res) => {
                 },
                 $set: { lastUpdated: Date.now() }
             });
+
+            // Save updated mood
+            await session.save();
         }
 
-        res.json(evaluation);
+        res.json({
+            ...evaluation,
+            interviewPhase: session.interviewPhase,
+            interviewerMood: session.interviewerMood
+        });
     } catch (err) {
         if (err.status) return res.status(err.status).json({ msg: err.message });
+        console.error(err);
+        res.status(500).send('Server Error');
+    }
+});
+
+// 4. End Interview & Get Hiring Decision
+router.post('/end', auth, checkQuota, async (req, res) => {
+    try {
+        const { sessionId } = req.body;
+        const session = await InterviewSession.findById(sessionId);
+        if (!session) return res.status(404).json({ msg: 'Session not found' });
+        if (session.user.toString() !== req.user.id) return res.status(401).json({ msg: 'Not authorized' });
+
+        // Compile context from messages
+        const conversation = session.messages.map(m =>
+            `${m.role === 'ai' ? 'Interviewer' : 'Candidate'}: "${m.content}"`
+        ).join('\n');
+
+        const prompt = `You are a Senior Hiring Manager.
+        Review this entire interview transcript for a "${session.difficulty || 'medium'}" level role.
+        
+        TRANSCRIPT:
+        ${conversation}
+        
+        Task: Provide a final hiring assessment as if you are a real human manager talking to a colleague.
+        
+        Return STRICT JSON format:
+        {
+            "hiringDecision": "Yes" | "Maybe" | "No",
+            "decisionReason": "Honest, human-like explanation. Start with 'If this were a real interview...'",
+            "strengths": ["List 3 key strengths."],
+            "weakAreas": ["List 3 specific weak areas."],
+            "improvementPlan": "Specific, actionable advice.",
+            "overallScore": (1-100)
+        }`;
+
+        const responseText = await generateContent(prompt, true);
+        await incrementUsage(req.user.id);
+
+        let report = { hiringDecision: "Maybe", overallScore: 50 };
+        try {
+            const match = responseText.match(/\{[\s\S]*\}/);
+            if (match) report = JSON.parse(match[0]);
+        } catch (e) { console.error("JSON Parse Error", e); }
+
+        // Save Report
+        session.finalFeedback = report;
+        await session.save();
+
+        res.json(report);
+
+    } catch (err) {
         console.error(err);
         res.status(500).send('Server Error');
     }
