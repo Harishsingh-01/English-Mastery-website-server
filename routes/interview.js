@@ -208,7 +208,19 @@ router.post('/question', auth, checkQuota, async (req, res) => {
         // 2. Select Random Base Question
         const baseQuestion = categoryQuestions[Math.floor(Math.random() * categoryQuestions.length)];
 
-        // 3. AI Rephrasing Prompt
+        // 3. Extract already asked questions from session history
+        let askedQuestions = [];
+        if (session && session.messages && session.messages.length > 0) {
+            askedQuestions = session.messages
+                .filter(m => m.role === 'ai')
+                .map(m => m.content)
+                .slice(0, 20); // Last 20 questions max
+        }
+        const questionHistory = askedQuestions.length > 0
+            ? `\n\nQUESTIONS ALREADY ASKED IN THIS SESSION (DO NOT repeat or ask similar):\n${askedQuestions.map((q, i) => `${i + 1}. ${q}`).join('\n')}\n\nYou MUST generate a COMPLETELY DIFFERENT question that is NOT similar to any of the above.`
+            : '';
+
+        // 4. AI Rephrasing Prompt
         const lengthPrompt = length === 'short' ? 'Keep it concise.' : '';
         const difficulty = (session && session.difficulty) ? session.difficulty : 'medium';
 
@@ -229,6 +241,7 @@ router.post('/question', auth, checkQuota, async (req, res) => {
              - If Technical: Pick a specific skill or tool mentioned in the resume and ask a conceptual question about it.
              - Do NOT ask generic questions like "Tell me about yourself". Be specific: "Tell me about your time at [Company]..." or "How did you use [Skill] in [Project]?"
              - IMPORTANT: Use SIMPLE, BASIC vocabulary. Avoid complex or advanced words. Keep the language clear and easy to understand.
+             ${questionHistory}
              
              ${lengthPrompt}
              Return ONLY the question string.`;
@@ -244,6 +257,7 @@ router.post('/question', auth, checkQuota, async (req, res) => {
              Task: Rephrase this question naturally to sound like a human interviewer. 
              - Keep the core meaning relevant to the question category.
              - Use SIMPLE, BASIC vocabulary. Avoid complex or fancy words. Keep it clear and easy to understand.
+             ${questionHistory}
              - ${lengthPrompt}
              
              Return ONLY the rephrased question string.`;
@@ -384,31 +398,61 @@ router.post('/evaluate', auth, checkQuota, async (req, res) => {
             ? `OBSERVATION: The candidate used filler words ${fillerCount} times (um, uh, maybe). You MUST point this out and tell them to sound more confident.`
             : "";
 
+        // EXTRACT ASKED QUESTIONS TO PREVENT DUPLICATES
+        let askedQuestions = [];
+        if (session && session.messages && session.messages.length > 0) {
+            askedQuestions = session.messages
+                .filter(m => m.role === 'ai')
+                .map(m => m.content)
+                .slice(0, 20); // Last 20 questions
+        }
+        const questionHistory = askedQuestions.length > 0
+            ? `\n\n🚫 QUESTIONS ALREADY ASKED (DO NOT REPEAT OR ASK SIMILAR):\n${askedQuestions.map((q, i) => `${i + 1}. ${q}`).join('\n')}\n\n⚠️ Your nextQuestion MUST be COMPLETELY DIFFERENT from all the above. Do not ask about the same topic even if worded differently.`
+            : '';
+
         // PHASE-SPECIFIC CONSTRAINTS FOR NEXT QUESTION
         // iType is already declared above
         let phaseConstraint = '';
 
         if (iType === 'hr') {
             // HR interview type: STRICT - absolutely NO technical content
-            phaseConstraint = `CRITICAL RULE - THIS IS AN HR INTERVIEW. You are ABSOLUTELY FORBIDDEN from asking about:
-            - Code, programming, frameworks, libraries, APIs
-            - Projects (even if mentioned by candidate)
-            - Technical skills, debugging, architecture
-            - Education details (BCA, degree specifics, coursework)
+            phaseConstraint = `🚨 CRITICAL RULE - THIS IS AN HR INTERVIEW 🚨
             
-            You MUST ONLY ask HR questions:
-            - Why do you want this job?
-            - What are your strengths/weaknesses?
-            - Where do you see yourself in 5 years?
-            - What motivates you?
-            - Why our company?
-            - Salary expectations?
-            - When can you start?
-            - How do you handle work-life balance?
+            ABSOLUTE PROHIBITIONS (You will FAIL if you ask about these):
+            ❌ Code, programming, frameworks, libraries, APIs, debugging
+            ❌ Projects - EVEN IF the candidate mentions them
+            ❌ Technical skills, architecture, system design
+            ❌ Education details (BCA specifics, coursework, assignments)
+            ❌ Technologies (MERN, React, Node, databases, etc.)
             
-            You may also ask Behavioral or Scenario questions (teamwork, leadership, conflict, hypothetical situations).
+            FORBIDDEN QUESTION EXAMPLES (NEVER ask these):
+            ❌ "Tell me about your MERN project"
+            ❌ "Can you walk me through a project where..."
+            ❌ "What technologies did you use in..."
+            ❌ "How did you implement..."
+            ❌ "Why did you choose BCA?"
+            ❌ "What challenges did you face in your projects?"
             
-            VIOLATION OF THIS RULE = IMMEDIATE FAILURE. DO NOT ask about projects, education, or technical topics.`;
+            ONLY ALLOWED QUESTIONS (Pick from these ONLY):
+            ✅ Why do you want this job?
+            ✅ What are your strengths/weaknesses?
+            ✅ Where do you see yourself in 5 years?
+            ✅ What motivates you at work?
+            ✅ Why our company specifically?
+            ✅ What are your salary expectations?
+            ✅ When can you start?
+            ✅ How do you handle work pressure?
+            ✅ Tell me about a time you worked in a team.
+            ✅ How do you handle conflicts?
+            ✅ Describe your work style.
+            ✅ What would you do if [hypothetical HR scenario]?
+            
+            🔒 RULE: If the candidate mentions projects, BCA, technologies, or any technical topic in their answer, IGNORE IT completely. Do NOT ask follow-up questions about it. Simply move to the NEXT standard HR question from the allowed list above.
+            
+            Example:
+            Candidate: "I'm studying BCA and built MERN projects..."
+            ❌ WRONG: "Tell me about your MERN projects"
+            ✅ CORRECT: "Great! What motivates you in your career?"`;
         } else if (iType === 'hybrid') {
             // Hybrid: Can ask ANY type of question
             phaseConstraint = `This is a Hybrid interview. Your nextQuestion can be from ANY category: Technical, HR, Behavioral, or Scenario. Mix it up based on the conversation flow.`;
@@ -437,6 +481,7 @@ router.post('/evaluate', auth, checkQuota, async (req, res) => {
         - strict: Short, direct, challenging. "Why did you do that?", "That lacks detail."
         
         ${phaseConstraint}
+        ${questionHistory}
         
         Evaluate the answer. Provide:
         1. A score out of 10.
@@ -447,7 +492,7 @@ router.post('/evaluate', auth, checkQuota, async (req, res) => {
         DYNAMIC NEXT QUESTION LOGIC (Must Follow):
         - Score < 5 (Weak): The candidate gave a weak or wrong answer. You MUST ask the SAME question again but rephrased simply.
         - Score 5-7 (Average): Answer is okay. Next question should be standard relative to the current phase.
-        - Score > 8 (Strong): Great answer. Next question MUST be a deeper, more challenging follow-up WITHIN THE SAME PHASE TYPE.
+        - Score > 8 (Strong): Great answer. ${iType === 'hr' ? 'Move to the NEXT standard HR question from the allowed list. DO NOT create a follow-up based on what the candidate mentioned (projects, education, etc.). Just pick another HR question like "What motivates you?" or "Why our company?"' : 'Next question MUST be a deeper, more challenging follow-up WITHIN THE SAME PHASE TYPE.'}
 
         Return STRICT JSON format (no markdown code blocks, no newlines in strings):
         {
