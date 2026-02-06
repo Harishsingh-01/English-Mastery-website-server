@@ -134,11 +134,11 @@ router.post('/question', auth, checkQuota, async (req, res) => {
         // CURATED QUESTION BANK
         const FAQ = {
             intro: [
-                "Can you briefly introduce yourself?",
-                "Tell me about yourself apart from what’s written on your resume.",
-                "Walk me through your academic and professional background.",
-                "Can you summarize your journey so far?",
-                "How would you describe yourself to someone meeting you for the first time?"
+                "Tell me about yourself.",
+                "What is your background?",
+                "Can you introduce yourself?",
+                "What should I know about you?",
+                "Describe your journey so far."
             ],
             technical: [
                 "Which backend or core technologies are you familiar with?",
@@ -151,27 +151,33 @@ router.post('/question', auth, checkQuota, async (req, res) => {
                 "Which tech stack are you most comfortable with?"
             ],
             behavioral: [
-                "Tell me about a time you faced a conflict in a team.",
-                "How do you usually resolve disagreements in a team?",
-                "Describe a situation where you showed leadership?",
-                "How do you handle feedback or criticism?",
-                "How do you approach tasks that are new to you?",
-                "Tell me about a failure in your project and what you learned from it."
+                "How do you handle conflicts?",
+                "Describe a time you showed leadership.",
+                "How do you take feedback?",
+                "Tell me about a challenge you overcame.",
+                "How do you work in teams?",
+                "What did you learn from a past failure?",
+                "How do you handle pressure?",
+                "Describe your work style."
             ],
             scenario: [
-                "What would you do if you are assigned a task you don’t know how to complete?",
+                "What would you do if you are assigned a task you don't know how to complete?",
                 "How would you respond if a project fails in production?",
                 "What if a client demands an unrealistic deadline?",
                 "How would you handle receiving a better offer after joining us?",
                 "What would you do if your senior is being unfair?"
             ],
             hr: [
-                "Why do you want to join our organization?",
-                "What motivates you to apply to our company specifically?",
-                "Where do you see yourself in the next 3 to 5 years?",
-                "What are your key strengths?",
-                "What is one weakness you are currently working on?",
-                "Why should we hire you for this role?"
+                "Why do you want this job?",
+                "Why our company?",
+                "Where do you see yourself in 5 years?",
+                "What are your strengths?",
+                "What are your weaknesses?",
+                "Why should we hire you?",
+                "What motivates you?",
+                "What is your expected salary?",
+                "When can you start?",
+                "Do you have any questions for us?"
             ],
             closing: [
                 "Do you have any questions for us?",
@@ -180,11 +186,26 @@ router.post('/question', auth, checkQuota, async (req, res) => {
             ]
         };
 
-        // 1. Determine Category based on Phase (STRICT STRUCTURE)
+        // 1. Determine Category based on Phase AND Interview Type
         const phase = (session && session.interviewPhase) ? session.interviewPhase : 'intro';
-        const categoryQuestions = FAQ[phase] || FAQ['intro'];
+        const iType = (session && session.interviewType) ? session.interviewType : 'general';
 
-        // 2. Select Random Base Question (Fallback)
+        // Multi-category support for HR and Hybrid
+        let availableCategories = [phase];
+
+        if (iType === 'hr' && !['intro', 'closing'].includes(phase)) {
+            // HR type: Can pull from hr, behavioral, scenario
+            availableCategories = ['hr', 'behavioral', 'scenario'];
+        } else if (iType === 'hybrid' && !['intro', 'closing'].includes(phase)) {
+            // Hybrid: Can pull from ALL categories
+            availableCategories = ['technical', 'hr', 'behavioral', 'scenario'];
+        }
+
+        // Select random category from available
+        const selectedCategory = availableCategories[Math.floor(Math.random() * availableCategories.length)];
+        const categoryQuestions = FAQ[selectedCategory] || FAQ[phase] || FAQ['intro'];
+
+        // 2. Select Random Base Question
         const baseQuestion = categoryQuestions[Math.floor(Math.random() * categoryQuestions.length)];
 
         // 3. AI Rephrasing Prompt
@@ -194,10 +215,11 @@ router.post('/question', auth, checkQuota, async (req, res) => {
         let prompt;
 
         // RESUME-DRIVEN PROMPT (If resume exists and phase allows)
-        if (context && (phase === 'intro' || phase === 'technical')) {
+        if (context && (phase === 'intro' || phase === 'technical' || iType === 'hybrid')) {
             prompt = `You are a professional Technical Interviewer.
              Candidate Level: ${difficulty}
              Interview Phase: ${phase}
+             Interview Type: ${iType}
              
              RESUME CONTEXT:
              ${context}
@@ -214,11 +236,12 @@ router.post('/question', auth, checkQuota, async (req, res) => {
             prompt = `You are a professional Interviewer.
              Candidate Level: ${difficulty}
              Interview Phase: ${phase}
+             Interview Type: ${iType}
              
              Base Question: "${baseQuestion}"
              
              Task: Rephrase this question naturally to sound like a human interviewer. 
-             - Keep the core meaning relevant to ${phase}.
+             - Keep the core meaning relevant to the question category.
              - ${lengthPrompt}
              
              Return ONLY the rephrased question string.`;
@@ -280,12 +303,24 @@ router.post('/evaluate', auth, checkQuota, async (req, res) => {
 
         // AUTO PHASE TRANSITION LOGIC
         session.questionCount += 1;
+        const iType = session.interviewType || 'general';
+
         if (session.questionCount >= 9) {
             session.interviewPhase = 'closing';
-        } else if (session.questionCount >= 6 && session.interviewPhase === 'technical') {
-            session.interviewPhase = 'behavioral';
+        } else if (session.questionCount >= 6) {
+            // Late Game: Stay in main phase
+            if (iType === 'technical') session.interviewPhase = 'technical';
+            else if (iType === 'hr') session.interviewPhase = 'hr'; // HR stays in 'hr' but pulls from hr+behavioral+scenario
+            else if (iType === 'behavioral') session.interviewPhase = 'behavioral';
+            else if (iType === 'hybrid') session.interviewPhase = 'technical'; // Hybrid stays flexible
+            else session.interviewPhase = 'behavioral'; // General: move to behavioral
         } else if (session.questionCount >= 2 && session.interviewPhase === 'intro') {
-            session.interviewPhase = 'technical';
+            // Early Game: Move to main phase based on interview type
+            if (iType === 'hr') session.interviewPhase = 'hr'; // HR → pulls from hr+behavioral+scenario
+            else if (iType === 'behavioral') session.interviewPhase = 'behavioral';
+            else if (iType === 'technical') session.interviewPhase = 'technical';
+            else if (iType === 'hybrid') session.interviewPhase = 'technical'; // Hybrid → pulls from all
+            else session.interviewPhase = 'technical'; // General default
         }
         // Save these updates later or now? We save at the end, so just updating object is enough for prompt use below.
 
@@ -302,8 +337,31 @@ router.post('/evaluate', auth, checkQuota, async (req, res) => {
             ? `OBSERVATION: The candidate used filler words ${fillerCount} times (um, uh, maybe). You MUST point this out and tell them to sound more confident.`
             : "";
 
+        // PHASE-SPECIFIC CONSTRAINTS FOR NEXT QUESTION
+        const iType = session.interviewType || 'general';
+        let phaseConstraint = '';
+
+        if (iType === 'hr') {
+            // HR interview type: Can ask HR, Behavioral, or Scenario questions (NO technical)
+            phaseConstraint = `CRITICAL: This is an HR-focused interview. Your nextQuestion can be from ANY of these categories:
+            - HR: career goals, company fit, strengths/weaknesses, motivation, salary expectations
+            - Behavioral: teamwork, conflict resolution, leadership, work style, handling pressure
+            - Scenario: hypothetical situations, "What would you do if..."
+            DO NOT ask technical questions about code, frameworks, or projects.`;
+        } else if (iType === 'hybrid') {
+            // Hybrid: Can ask ANY type of question
+            phaseConstraint = `This is a Hybrid interview. Your nextQuestion can be from ANY category: Technical, HR, Behavioral, or Scenario. Mix it up based on the conversation flow.`;
+        } else if (currentPhase === 'behavioral') {
+            phaseConstraint = `CRITICAL: This is a Behavioral interview. Your nextQuestion MUST be behavioral: teamwork, conflict resolution, leadership, work style, handling pressure. DO NOT ask technical questions.`;
+        } else if (currentPhase === 'technical') {
+            phaseConstraint = `This is a Technical interview. Your nextQuestion should focus on technical skills, projects, technologies, debugging, architecture.`;
+        } else if (currentPhase === 'intro') {
+            phaseConstraint = `This is the Introduction phase. Keep nextQuestion general and introductory.`;
+        }
+
         const prompt = `You are an expert interviewer.
         Interview Phase: ${currentPhase}
+        Interview Type: ${iType}
         Candidate Level: ${difficulty}
         Interviewer Mood: ${currentMood}
         
@@ -317,6 +375,8 @@ router.post('/evaluate', auth, checkQuota, async (req, res) => {
         - neutral: Professional, balanced, objective.
         - strict: Short, direct, challenging. "Why did you do that?", "That lacks detail."
         
+        ${phaseConstraint}
+        
         Evaluate the answer. Provide:
         1. A score out of 10.
         2. Feedback on grammar and tone.
@@ -326,7 +386,7 @@ router.post('/evaluate', auth, checkQuota, async (req, res) => {
         DYNAMIC NEXT QUESTION LOGIC (Must Follow):
         - Score < 5 (Weak): The candidate gave a weak or wrong answer. You MUST ask the SAME question again but rephrased simply.
         - Score 5-7 (Average): Answer is okay. Next question should be standard relative to the current phase.
-        - Score > 8 (Strong): Great answer. Next question MUST be a deeper, more challenging follow-up or a slightly harder scenario.
+        - Score > 8 (Strong): Great answer. Next question MUST be a deeper, more challenging follow-up WITHIN THE SAME PHASE TYPE.
 
         Return STRICT JSON format (no markdown code blocks, no newlines in strings):
         {
