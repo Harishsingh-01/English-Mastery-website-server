@@ -276,13 +276,58 @@ router.post('/question', auth, checkQuota, async (req, res) => {
 router.post('/evaluate', auth, checkQuota, async (req, res) => {
     const { question, answer, sessionId, length } = req.body;
     try {
-        // 0. QUICK CHECK: Interrupt Vague Answers (Quota Saver)
-        // BUT allow "Skip", "Next", "I don't know" to pass through to AI
-        const skipPhrases = ['next', 'skip', 'pass', 'don\'t know', 'cant answer', 'unsure', 'move on', 'proceed'];
+        // 0. SPECIAL HANDLING FOR SKIP/DON'T KNOW RESPONSES
+        // These should move on immediately without asking for elaboration
+        const skipPhrases = ['next', 'skip', 'pass', 'don\'t know', 'dont know', 'no idea', 'cant answer', 'can\'t answer', 'unsure', 'move on', 'proceed', 'idk'];
         const isSkip = skipPhrases.some(phrase => answer.toLowerCase().includes(phrase));
         const wordCount = answer.trim().split(/\s+/).length;
 
-        if (!isSkip && wordCount < 15) {
+        // If user says "don't know" or similar, immediately give neutral score and move on
+        if (isSkip) {
+            const session = await InterviewSession.findById(sessionId);
+            if (session) {
+                session.questionCount += 1;
+                const iType = session.interviewType || 'general';
+
+                // Save the skip response
+                await InterviewSession.findByIdAndUpdate(sessionId, {
+                    $push: { messages: { role: 'user', content: answer, evaluation: { score: 5 } } },
+                    $set: { lastUpdated: Date.now(), questionCount: session.questionCount },
+                });
+
+                // Generate a simple next question based on interview type
+                let nextQuestion = "Let's move on. Tell me about your strengths.";
+                if (iType === 'hr' || session.interviewPhase === 'hr') {
+                    const hrQuestions = [
+                        "What motivates you at work?",
+                        "Why do you want this job?",
+                        "Where do you see yourself in 5 years?",
+                        "What are your salary expectations?",
+                        "When can you start?"
+                    ];
+                    nextQuestion = hrQuestions[Math.floor(Math.random() * hrQuestions.length)];
+                } else if (iType === 'behavioral' || session.interviewPhase === 'behavioral') {
+                    const behavioralQuestions = [
+                        "How do you handle pressure?",
+                        "Tell me about a time you worked in a team.",
+                        "How do you take feedback?",
+                        "Describe your work style."
+                    ];
+                    nextQuestion = behavioralQuestions[Math.floor(Math.random() * behavioralQuestions.length)];
+                }
+
+                return res.json({
+                    score: 5,
+                    feedback: "No worries. Let's try a different question.",
+                    betterAnswer: "",
+                    nextQuestion: nextQuestion,
+                    mistakes: []
+                });
+            }
+        }
+
+        // 1. VAGUE ANSWER CHECK (for very short answers that aren't skips)
+        if (wordCount < 15) {
             // Save to session even if "fake" evaluation
             if (sessionId) {
                 await InterviewSession.findByIdAndUpdate(sessionId, {
@@ -340,16 +385,30 @@ router.post('/evaluate', auth, checkQuota, async (req, res) => {
             : "";
 
         // PHASE-SPECIFIC CONSTRAINTS FOR NEXT QUESTION
-        const iType = session.interviewType || 'general';
+        // iType is already declared above
         let phaseConstraint = '';
 
         if (iType === 'hr') {
-            // HR interview type: Can ask HR, Behavioral, or Scenario questions (NO technical)
-            phaseConstraint = `CRITICAL: This is an HR-focused interview. Your nextQuestion can be from ANY of these categories:
-            - HR: career goals, company fit, strengths/weaknesses, motivation, salary expectations
-            - Behavioral: teamwork, conflict resolution, leadership, work style, handling pressure
-            - Scenario: hypothetical situations, "What would you do if..."
-            DO NOT ask technical questions about code, frameworks, or projects.`;
+            // HR interview type: STRICT - absolutely NO technical content
+            phaseConstraint = `CRITICAL RULE - THIS IS AN HR INTERVIEW. You are ABSOLUTELY FORBIDDEN from asking about:
+            - Code, programming, frameworks, libraries, APIs
+            - Projects (even if mentioned by candidate)
+            - Technical skills, debugging, architecture
+            - Education details (BCA, degree specifics, coursework)
+            
+            You MUST ONLY ask HR questions:
+            - Why do you want this job?
+            - What are your strengths/weaknesses?
+            - Where do you see yourself in 5 years?
+            - What motivates you?
+            - Why our company?
+            - Salary expectations?
+            - When can you start?
+            - How do you handle work-life balance?
+            
+            You may also ask Behavioral or Scenario questions (teamwork, leadership, conflict, hypothetical situations).
+            
+            VIOLATION OF THIS RULE = IMMEDIATE FAILURE. DO NOT ask about projects, education, or technical topics.`;
         } else if (iType === 'hybrid') {
             // Hybrid: Can ask ANY type of question
             phaseConstraint = `This is a Hybrid interview. Your nextQuestion can be from ANY category: Technical, HR, Behavioral, or Scenario. Mix it up based on the conversation flow.`;
