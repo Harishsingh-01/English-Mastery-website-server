@@ -228,6 +228,7 @@ router.post('/question', auth, checkQuota, async (req, res) => {
              - If Intro: Ask about a specific project or role summary.
              - If Technical: Pick a specific skill or tool mentioned in the resume and ask a conceptual question about it.
              - Do NOT ask generic questions like "Tell me about yourself". Be specific: "Tell me about your time at [Company]..." or "How did you use [Skill] in [Project]?"
+             - IMPORTANT: Use SIMPLE, BASIC vocabulary. Avoid complex or advanced words. Keep the language clear and easy to understand.
              
              ${lengthPrompt}
              Return ONLY the question string.`;
@@ -242,6 +243,7 @@ router.post('/question', auth, checkQuota, async (req, res) => {
              
              Task: Rephrase this question naturally to sound like a human interviewer. 
              - Keep the core meaning relevant to the question category.
+             - Use SIMPLE, BASIC vocabulary. Avoid complex or fancy words. Keep it clear and easy to understand.
              - ${lengthPrompt}
              
              Return ONLY the rephrased question string.`;
