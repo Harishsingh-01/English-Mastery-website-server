@@ -1,5 +1,5 @@
 const express = require('express');
-const router = express.Router();
+const router = express.Router({ mergeParams: true });
 const auth = require('../middleware/auth');
 const multer = require('multer');
 const fs = require('fs');
@@ -8,7 +8,6 @@ const fs = require('fs');
 const InterviewSession = require('../models/InterviewSession');
 const Mistake = require('../models/Mistake');
 const { generateContent } = require('../utils/aiHelper');
-const { checkQuota, incrementUsage } = require('../middleware/quota');
 
 const upload = multer({
     dest: 'uploads/',
@@ -68,8 +67,7 @@ router.post('/start', auth, upload.single('resume'), async (req, res) => {
         await session.save();
         res.json(session);
     } catch (err) {
-        console.error(err);
-        res.status(500).send('Server Error');
+        next(err);
     }
 });
 
@@ -81,8 +79,7 @@ router.get('/history', auth, async (req, res) => {
             .select('title lastUpdated createdAt');
         res.json(sessions);
     } catch (err) {
-        console.error(err);
-        res.status(500).send('Server Error');
+        next(err);
     }
 });
 
@@ -96,8 +93,7 @@ router.delete('/session/:id', auth, async (req, res) => {
         await InterviewSession.deleteOne({ _id: req.params.id });
         res.json({ msg: 'Session removed' });
     } catch (err) {
-        console.error(err);
-        res.status(500).send('Server Error');
+        next(err);
     }
 });
 
@@ -109,15 +105,14 @@ router.get('/session/:id', auth, async (req, res) => {
         if (session.user.toString() !== req.user.id) return res.status(401).json({ msg: 'Not authorized' });
         res.json(session);
     } catch (err) {
-        console.error(err);
-        res.status(500).send('Server Error');
+        next(err);
     }
 });
 
 // --- AI Interactions (Updated with Context) ---
 
 // Get a random interview question
-router.post('/question', auth, checkQuota, async (req, res) => {
+router.post('/question', auth, async (req, res) => {
     try {
         const { type, sessionId, length } = req.body; // length: 'short', 'medium', 'long'
 
@@ -264,7 +259,6 @@ router.post('/question', auth, checkQuota, async (req, res) => {
         }
 
         const questionText = await generateContent(prompt); // plain text response
-        await incrementUsage(req.user.id);
 
         // Save to session if exists
         if (sessionId) {
@@ -280,14 +274,12 @@ router.post('/question', auth, checkQuota, async (req, res) => {
             interviewerMood: (session && session.interviewerMood) ? session.interviewerMood : 'friendly'
         });
     } catch (err) {
-        if (err.status) return res.status(err.status).json({ msg: err.message });
-        console.error(err);
-        res.status(500).send('Server Error');
+        next(err);
     }
 });
 
 // Evaluate answer
-router.post('/evaluate', auth, checkQuota, async (req, res) => {
+router.post('/evaluate', auth, async (req, res) => {
     const { question, answer, sessionId, length } = req.body;
     try {
         // 0. SPECIAL HANDLING FOR SKIP/DON'T KNOW RESPONSES
@@ -596,14 +588,12 @@ router.post('/evaluate', auth, checkQuota, async (req, res) => {
             interviewerMood: session.interviewerMood
         });
     } catch (err) {
-        if (err.status) return res.status(err.status).json({ msg: err.message });
-        console.error(err);
-        res.status(500).send('Server Error');
+        next(err);
     }
 });
 
 // 4. End Interview & Get Hiring Decision
-router.post('/end', auth, checkQuota, async (req, res) => {
+router.post('/end', auth, async (req, res) => {
     try {
         const { sessionId } = req.body;
         const session = await InterviewSession.findById(sessionId);
@@ -634,7 +624,6 @@ router.post('/end', auth, checkQuota, async (req, res) => {
         }`;
 
         const responseText = await generateContent(prompt, true);
-        await incrementUsage(req.user.id);
 
         let report = { hiringDecision: "Maybe", overallScore: 50 };
         try {
@@ -649,8 +638,7 @@ router.post('/end', auth, checkQuota, async (req, res) => {
         res.json(report);
 
     } catch (err) {
-        console.error(err);
-        res.status(500).send('Server Error');
+        next(err);
     }
 });
 

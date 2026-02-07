@@ -4,12 +4,11 @@ const auth = require('../middleware/auth');
 const SentenceHistory = require('../models/SentenceHistory');
 const Mistake = require('../models/Mistake');
 const { generateContent } = require('../utils/aiHelper');
-const { checkQuota, incrementUsage } = require('../middleware/quota');
 
 
 
 
-router.post('/', auth, checkQuota, async (req, res) => {
+router.post('/', auth, async (req, res, next) => {
     const { sentence, strictMode } = req.body;
 
     if (!sentence) {
@@ -55,7 +54,6 @@ router.post('/', auth, checkQuota, async (req, res) => {
         }
 
         const responseText = await generateContent(prompt, true);
-        await incrementUsage(req.user.id);
         let text = responseText;
         // Cleanup JSON
         const match = text.match(/\{[\s\S]*\}/);
@@ -112,13 +110,12 @@ router.post('/', auth, checkQuota, async (req, res) => {
         res.json(result);
 
     } catch (err) {
-        console.error(err.message);
-        res.status(500).send('Server Error');
+        next(err);
     }
 });
 
 // Generate examples for a rule
-router.post('/examples', auth, checkQuota, async (req, res) => {
+router.post('/examples', auth, async (req, res, next) => {
     const { rule, mistake } = req.body;
     try {
         const prompt = `Provide 3 clear, simple sentences demonstrating the correct usage of the following English grammar rule.
@@ -136,15 +133,12 @@ router.post('/examples', auth, checkQuota, async (req, res) => {
 
         res.json(JSON.parse(text));
     } catch (err) {
-        // Forward status from helper if available
-        if (err.status) return res.status(err.status).json({ msg: err.message });
-        console.error('Examples Route Error:', err);
-        res.status(500).send('Server Error');
+        next(err);
     }
 });
 
 // Get user stats (Mistakes, Improvement, etc.)
-router.get('/stats', auth, async (req, res) => {
+router.get('/stats', auth, async (req, res, next) => {
     try {
         const totalMistakes = await Mistake.countDocuments({ userId: req.user.id });
         const totalChecks = await SentenceHistory.countDocuments({ userId: req.user.id });
@@ -162,8 +156,7 @@ router.get('/stats', auth, async (req, res) => {
             topMistakes
         });
     } catch (err) {
-        console.error(err);
-        res.status(500).send('Server Error');
+        next(err);
     }
 });
 

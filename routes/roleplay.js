@@ -2,7 +2,6 @@ const express = require('express');
 const router = express.Router();
 const { generateContent: generateAIResponse } = require('../utils/aiHelper');
 const auth = require('../middleware/auth');
-const { checkQuota, incrementUsage } = require('../middleware/quota');
 
 // Scenarios Configuration
 const SCENARIOS = {
@@ -35,7 +34,7 @@ const SCENARIOS = {
 // @route   POST /api/roleplay/start
 // @desc    Start a new roleplay scenario
 // @access  Private
-router.post('/start', auth, checkQuota, async (req, res) => {
+router.post('/start', auth, async (req, res) => {
     const { scenario } = req.body;
 
     if (!SCENARIOS[scenario]) {
@@ -52,7 +51,7 @@ router.post('/start', auth, checkQuota, async (req, res) => {
 // @route   POST /api/roleplay/chat
 // @desc    Continue the conversation
 // @access  Private
-router.post('/chat', auth, checkQuota, async (req, res) => {
+router.post('/chat', auth, async (req, res) => {
     const { message, history, scenario, difficulty = 'medium', correctionMode = 'off' } = req.body;
 
     if (!message || !scenario || !SCENARIOS[scenario]) {
@@ -135,7 +134,7 @@ const RoleplaySession = require('../models/RoleplaySession');
 // @route   POST /api/roleplay/feedback
 // @desc    Analyze the full conversation AND save to DB
 // @access  Private
-router.post('/feedback', auth, checkQuota, async (req, res) => {
+router.post('/feedback', auth, async (req, res) => {
     const { history, scenario } = req.body;
 
     try {

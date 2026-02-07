@@ -3,10 +3,9 @@ const router = express.Router();
 const auth = require('../middleware/auth');
 const DebateSession = require('../models/DebateSession');
 const { generateContent } = require('../utils/aiHelper');
-const { checkQuota, incrementUsage } = require('../middleware/quota');
 
 // Initialize debate (Generate Topic + Sides)
-router.post('/init', auth, checkQuota, async (req, res) => {
+router.post('/init', auth, async (req, res) => {
     const { topic, difficulty = 'medium' } = req.body;
 
     try {
@@ -30,7 +29,6 @@ router.post('/init', auth, checkQuota, async (req, res) => {
                 Return ONLY the topic sentence.`;
             }
             selectedTopic = await generateContent(topicPrompt);
-            await incrementUsage(req.user.id);
         }
 
         // EXTRACT SIDES
@@ -51,13 +49,12 @@ router.post('/init', auth, checkQuota, async (req, res) => {
         res.json({ topic: selectedTopic, sides });
 
     } catch (err) {
-        console.error(err);
-        res.status(500).send('Server Error');
+        next(err);
     }
 });
 
 // Start a new debate
-router.post('/start', auth, checkQuota, async (req, res) => {
+router.post('/start', auth, async (req, res) => {
     const { topic, difficulty = 'medium', userStance } = req.body; // Added userStance
 
 
@@ -81,7 +78,6 @@ router.post('/start', auth, checkQuota, async (req, res) => {
         Return ONLY your opening statement.`;
 
         const openingStatement = await generateContent(openingPrompt);
-        await incrementUsage(req.user.id);
 
         const session = new DebateSession({
             user: req.user.id,
@@ -102,13 +98,12 @@ router.post('/start', auth, checkQuota, async (req, res) => {
         });
 
     } catch (err) {
-        console.error(err);
-        res.status(500).send('Server Error');
+        next(err);
     }
 });
 
 // Process a user turn
-router.post('/turn', auth, checkQuota, async (req, res) => {
+router.post('/turn', auth, async (req, res) => {
     const { sessionId, message, argumentHistory, strategy } = req.body; // Added strategy
 
     try {
@@ -129,7 +124,6 @@ router.post('/turn', auth, checkQuota, async (req, res) => {
         }`;
 
         const feedbackRes = await generateContent(feedbackPrompt, true);
-        await incrementUsage(req.user.id);
 
         let feedbackData = { coherenceScore: 0, strengthScore: 0, fallacies: [], feedback: "Keep going!" };
         try {
@@ -203,7 +197,6 @@ router.post('/turn', auth, checkQuota, async (req, res) => {
         Return ONLY your text response.`;
 
         const rebuttal = await generateContent(rebuttalPrompt);
-        await incrementUsage(req.user.id);
 
         session.turns.push({
             role: 'ai',
@@ -218,8 +211,7 @@ router.post('/turn', auth, checkQuota, async (req, res) => {
         });
 
     } catch (err) {
-        console.error(err);
-        res.status(500).send('Server Error');
+        next(err);
     }
 });
 
@@ -259,8 +251,7 @@ router.post('/end', auth, async (req, res) => {
         res.json(reportData);
 
     } catch (err) {
-        console.error(err);
-        res.status(500).send('Server Error');
+        next(err);
     }
 });
 

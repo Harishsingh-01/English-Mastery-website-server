@@ -2,9 +2,8 @@ const express = require('express');
 const router = express.Router();
 const auth = require('../middleware/auth');
 const { generateContent } = require('../utils/aiHelper');
-const { checkQuota, incrementUsage } = require('../middleware/quota');
 
-router.post('/', auth, checkQuota, async (req, res) => {
+router.post('/', auth, async (req, res, next) => {
     const { text, targetLang } = req.body;
 
     if (!text) {
@@ -20,14 +19,11 @@ router.post('/', auth, checkQuota, async (req, res) => {
         Text: "${text}"`;
 
         const translatedText = await generateContent(prompt);
-        await incrementUsage(req.user.id);
 
         res.json({ translation: translatedText.trim() });
 
     } catch (err) {
-        if (err.status) return res.status(err.status).json({ msg: err.message });
-        console.error(err.message);
-        res.status(500).send('Server Error');
+        next(err);
     }
 });
 

@@ -25,8 +25,7 @@ router.post('/signup', async (req, res) => {
             res.json({ token, user: { id: user.id, name: user.name, email: user.email } });
         });
     } catch (err) {
-        console.error(err.message);
-        res.status(500).send('Server error');
+        next(err);
     }
 });
 
@@ -46,8 +45,7 @@ router.post('/login', async (req, res) => {
             res.json({ token, user: { id: user.id, name: user.name, email: user.email } });
         });
     } catch (err) {
-        console.error(err.message);
-        res.status(500).send('Server error');
+        next(err);
     }
 });
 
@@ -57,8 +55,7 @@ router.get('/usage', auth, async (req, res) => {
         const user = await User.findById(req.user.id).select('usage');
         res.json(user.usage);
     } catch (err) {
-        console.error(err.message);
-        res.status(500).send('Server error');
+        next(err);
     }
 });
 
@@ -68,8 +65,7 @@ router.get('/me', auth, async (req, res) => {
         const user = await User.findById(req.user.id).select('-password');
         res.json(user);
     } catch (err) {
-        console.error(err.message);
-        res.status(500).send('Server error');
+        next(err);
     }
 });
 
@@ -84,8 +80,7 @@ router.put('/update', auth, async (req, res) => {
         ).select('-password');
         res.json(user);
     } catch (err) {
-        console.error(err.message);
-        res.status(500).send('Server Error');
+        next(err);
     }
 });
 
@@ -106,8 +101,7 @@ router.put('/password', auth, async (req, res) => {
 
         res.json({ msg: 'Password updated successfully' });
     } catch (err) {
-        console.error(err.message);
-        res.status(500).send('Server Error');
+        next(err);
     }
 });
 
@@ -130,8 +124,7 @@ router.post('/forgot-password', async (req, res) => {
 
         res.json({ msg: 'Email sent', token: token }); // Sending token for dev purposes
     } catch (err) {
-        console.error(err.message);
-        res.status(500).send('Server Error');
+        next(err);
     }
 });
 
@@ -154,8 +147,7 @@ router.post('/reset-password', async (req, res) => {
 
         res.json({ msg: 'Password reset successfully' });
     } catch (err) {
-        console.error(err.message);
-        res.status(500).send('Server Error');
+        next(err);
     }
 });
 

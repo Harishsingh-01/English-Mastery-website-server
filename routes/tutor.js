@@ -2,12 +2,11 @@ const express = require('express');
 const router = express.Router();
 const auth = require('../middleware/auth');
 const { generateContent } = require('../utils/aiHelper');
-const { checkQuota, incrementUsage } = require('../middleware/quota');
 
 const TutorSession = require('../models/TutorSession');
 
 // Generic AI Chat Endpoint
-router.post('/chat', auth, checkQuota, async (req, res) => {
+router.post('/chat', auth, async (req, res, next) => {
     try {
         const { message, history } = req.body; // history: [{ role: 'user'|'ai', content: '...' }]
 
@@ -33,7 +32,6 @@ router.post('/chat', auth, checkQuota, async (req, res) => {
         Keep your response concise and engaging.`;
 
         const responseText = await generateContent(prompt);
-        await incrementUsage(req.user.id);
 
         // --- Persistence Logic ---
         // Find recent session (active within last 1 hour)
@@ -57,9 +55,7 @@ router.post('/chat', auth, checkQuota, async (req, res) => {
 
         res.json({ reply: responseText });
     } catch (err) {
-        if (err.status) return res.status(err.status).json({ msg: err.message });
-        console.error(err);
-        res.status(500).send('Server Error');
+        next(err);
     }
 });
 
