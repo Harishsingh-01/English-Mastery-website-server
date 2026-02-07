@@ -209,7 +209,7 @@ router.post('/question', auth, async (req, res) => {
             askedQuestions = session.messages
                 .filter(m => m.role === 'ai')
                 .map(m => m.content)
-                .slice(0, 20); // Last 20 questions max
+                .slice(0, 10); // Last 10 questions (token optimization)
         }
         const questionHistory = askedQuestions.length > 0
             ? `\n\nQUESTIONS ALREADY ASKED IN THIS SESSION (DO NOT repeat or ask similar):\n${askedQuestions.map((q, i) => `${i + 1}. ${q}`).join('\n')}\n\nYou MUST generate a COMPLETELY DIFFERENT question that is NOT similar to any of the above.`
@@ -396,7 +396,7 @@ router.post('/evaluate', auth, async (req, res) => {
             askedQuestions = session.messages
                 .filter(m => m.role === 'ai')
                 .map(m => m.content)
-                .slice(0, 20); // Last 20 questions
+                .slice(0, 10); // Last 10 questions (token optimization)
         }
         const questionHistory = askedQuestions.length > 0
             ? `\n\n🚫 QUESTIONS ALREADY ASKED (DO NOT REPEAT OR ASK SIMILAR):\n${askedQuestions.map((q, i) => `${i + 1}. ${q}`).join('\n')}\n\n⚠️ Your nextQuestion MUST be COMPLETELY DIFFERENT from all the above. Do not ask about the same topic even if worded differently.`
@@ -407,44 +407,11 @@ router.post('/evaluate', auth, async (req, res) => {
         let phaseConstraint = '';
 
         if (iType === 'hr') {
-            // HR interview type: STRICT - absolutely NO technical content
-            phaseConstraint = `🚨 CRITICAL RULE - THIS IS AN HR INTERVIEW 🚨
-            
-            ABSOLUTE PROHIBITIONS (You will FAIL if you ask about these):
-            ❌ Code, programming, frameworks, libraries, APIs, debugging
-            ❌ Projects - EVEN IF the candidate mentions them
-            ❌ Technical skills, architecture, system design
-            ❌ Education details (BCA specifics, coursework, assignments)
-            ❌ Technologies (MERN, React, Node, databases, etc.)
-            
-            FORBIDDEN QUESTION EXAMPLES (NEVER ask these):
-            ❌ "Tell me about your MERN project"
-            ❌ "Can you walk me through a project where..."
-            ❌ "What technologies did you use in..."
-            ❌ "How did you implement..."
-            ❌ "Why did you choose BCA?"
-            ❌ "What challenges did you face in your projects?"
-            
-            ONLY ALLOWED QUESTIONS (Pick from these ONLY):
-            ✅ Why do you want this job?
-            ✅ What are your strengths/weaknesses?
-            ✅ Where do you see yourself in 5 years?
-            ✅ What motivates you at work?
-            ✅ Why our company specifically?
-            ✅ What are your salary expectations?
-            ✅ When can you start?
-            ✅ How do you handle work pressure?
-            ✅ Tell me about a time you worked in a team.
-            ✅ How do you handle conflicts?
-            ✅ Describe your work style.
-            ✅ What would you do if [hypothetical HR scenario]?
-            
-            🔒 RULE: If the candidate mentions projects, BCA, technologies, or any technical topic in their answer, IGNORE IT completely. Do NOT ask follow-up questions about it. Simply move to the NEXT standard HR question from the allowed list above.
-            
-            Example:
-            Candidate: "I'm studying BCA and built MERN projects..."
-            ❌ WRONG: "Tell me about your MERN projects"
-            ✅ CORRECT: "Great! What motivates you in your career?"`;
+            // HR interview: NO technical questions allowed
+            phaseConstraint = `HR INTERVIEW RULE: Absolutely NO questions about code, projects, technologies, or education details.
+FORBIDDEN: "Tell me about your project", "What tech did you use", "Why BCA?" etc.
+ALLOWED ONLY: Job motivation, strengths/weaknesses, 5-year goals, salary, teamwork, conflicts, work style.
+If candidate mentions technical topics, IGNORE them and ask a standard HR question instead.`;
         } else if (iType === 'hybrid') {
             // Hybrid: Can ask ANY type of question
             phaseConstraint = `This is a Hybrid interview. Your nextQuestion can be from ANY category: Technical, HR, Behavioral, or Scenario. Mix it up based on the conversation flow.`;
