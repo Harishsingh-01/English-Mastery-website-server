@@ -68,14 +68,15 @@ router.post('/start', auth, async (req, res) => {
         
         Your Goal: You must argue AGAINST the user's stance.
         
-        CRITICAL INSTRUCTION FOR EASY MODE:
-        - If difficulty is 'easy', use A2 (Elementary) level English.
-        - Use simple, natural everyday words. Avoid complex academic terms.
-        - WRITE 3-5 CLEAR SENTENCES.
-        - Example: "I disagree with you. I think [Opposite] is better because..."
+        CRITICAL CONSTRAINTS:
+        - MAXIMUM LENGTH: 200-400 characters (strictly enforced)
+        - Keep it punchy and concise - debate responses, not essays
+        - If difficulty is 'easy', use A2 (Elementary) level English
+        - Use simple, natural everyday words. Avoid complex academic terms
+        - WRITE 2-4 CLEAR, SHORT SENTENCES
+        - Example: "I disagree. [Opposite] is better because [1-2 reasons]."
         
-        For other difficulties, adjust accordingly.
-        Return ONLY your opening statement.`;
+        Return ONLY your opening statement (200-400 characters max).`;
 
         const openingStatement = await generateContent(openingPrompt);
 
@@ -188,13 +189,17 @@ router.post('/turn', auth, async (req, res) => {
         ${strategyInstructions}
         ${vocabInstructions}
         
-        INSTRUCTIONS:
-        1. MEMORY CHECK: Review "PAST ARGUMENTS". If the USER has contradicted their own previous statements, YOU MUST POINT IT OUT ("Earlier you argued X, but now you say Y...").
-        2. ACKNOWLEDGE: Briefly summarize their current point.
-        3. COUNTER: Apply the strategy mode (${strategy ? strategy.mode : 'standard'}) to logically dismantle or address their point.
+        CRITICAL CONSTRAINT:
+        - MAXIMUM LENGTH: 200-400 characters (strictly enforced)
+        - Keep it concise and punchy - short debate turns, not long paragraphs
         
-        IMPORTANT: Listen and Respond. Do not monologue. Use the memory!
-        Return ONLY your text response.`;
+        INSTRUCTIONS:
+        1. MEMORY CHECK: If USER contradicted previous statements, point it out briefly.
+        2. ACKNOWLEDGE: One sentence on their point.
+        3. COUNTER: Apply strategy mode (${strategy ? strategy.mode : 'standard'}) - 1-2 sentences max.
+        
+        IMPORTANT: Listen and Respond. No monologues. Be concise!
+        Return ONLY your text response (200-400 characters max).`;
 
         const rebuttal = await generateContent(rebuttalPrompt);
 
