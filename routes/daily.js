@@ -97,30 +97,71 @@ router.get('/word', auth, async (req, res) => {
             wordDate.setDate(mondayDate.getDate() + i);
             const dateStr = wordDate.toISOString().split('T')[0];
 
-            const wordDoc = new DailyWord({
-                date: dateStr,
-                word: weekData[i].word,
-                pronunciation: weekData[i].pronunciation,
-                definition: weekData[i].definition,
-                hindiMeaning: weekData[i].hindiMeaning,
-                examples: weekData[i].examples
-            });
+            try {
+                // Check if word already exists for this date
+                let existingWord = await DailyWord.findOne({ date: dateStr });
 
-            await wordDoc.save();
-            savedWords.push(wordDoc);
+                if (existingWord) {
+                    console.log(`Word for ${dateStr} already exists, skipping...`);
+                    savedWords.push(existingWord);
 
-            // If this is today, set it as the return value
-            if (dateStr === today) {
-                daily = wordDoc;
+                    // If this is today, set it as the return value
+                    if (dateStr === today) {
+                        daily = existingWord;
+                    }
+                    continue;
+                }
+
+                const wordDoc = new DailyWord({
+                    date: dateStr,
+                    word: weekData[i].word,
+                    pronunciation: weekData[i].pronunciation,
+                    definition: weekData[i].definition,
+                    hindiMeaning: weekData[i].hindiMeaning,
+                    examples: weekData[i].examples
+                });
+
+                await wordDoc.save();
+                savedWords.push(wordDoc);
+
+                // If this is today, set it as the return value
+                if (dateStr === today) {
+                    daily = wordDoc;
+                }
+            } catch (err) {
+                // Handle duplicate key error gracefully
+                if (err.code === 11000) {
+                    console.log(`Duplicate key error for ${dateStr}, fetching existing word...`);
+                    const existingWord = await DailyWord.findOne({ date: dateStr });
+                    if (existingWord) {
+                        savedWords.push(existingWord);
+                        if (dateStr === today) {
+                            daily = existingWord;
+                        }
+                    }
+                } else {
+                    // Log other errors but don't crash the entire process
+                    console.error(`Error saving word for ${dateStr}:`, err.message);
+                }
             }
         }
 
-        console.log(`✅ Generated and saved 7 words for week starting ${weekStart}`);
+        console.log(`✅ Generated and saved ${savedWords.length} words for week starting ${weekStart}`);
 
         // 5. Return today's word
         if (!daily) {
-            // Edge case: today might be before the week start
-            daily = savedWords[0];
+            // Edge case: today might be before the week start or not found
+            // Try to find today's word one more time
+            daily = await DailyWord.findOne({ date: today });
+
+            if (!daily && savedWords.length > 0) {
+                // Last resort: return first word from saved words
+                daily = savedWords[0];
+            }
+        }
+
+        if (!daily) {
+            throw new Error('Could not generate or find today\'s word');
         }
 
         res.json(daily);

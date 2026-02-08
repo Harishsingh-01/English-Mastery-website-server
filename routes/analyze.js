@@ -4,6 +4,7 @@ const auth = require('../middleware/auth');
 const SentenceHistory = require('../models/SentenceHistory');
 const Mistake = require('../models/Mistake');
 const { generateContent } = require('../utils/aiHelper');
+const { incrementUsage } = require('../middleware/quota');
 
 
 

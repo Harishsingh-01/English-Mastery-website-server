@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { generateContent: generateAIResponse } = require('../utils/aiHelper');
 const auth = require('../middleware/auth');
+const { incrementUsage } = require('../middleware/quota');
 
 // Scenarios Configuration
 const SCENARIOS = {
